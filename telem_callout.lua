@@ -25,7 +25,7 @@ local function findFreeLogicalSwitches(count)
     for i = 0, 63 do
         local ls = model.getLogicalSwitch(i)
         if not ls or ls.func == 0 or ls.func == LS_FUNC_NONE then
-            table.insert(free_indices, i)
+            free_indices[#free_indices + 1] = i
             if #free_indices == count then
                 return free_indices
             end
@@ -40,7 +40,7 @@ local function findFreeSpecialFunctions(count)
     for i = 0, 63 do
         local sf = model.getCustomFunction(i)
         if not sf or sf.func == 0 then
-            table.insert(free_indices, i)
+            free_indices[#free_indices + 1] = i
             if #free_indices == count then
                 return free_indices
             end
@@ -79,6 +79,8 @@ local function writeSettings()
         total_voltage_scaled = math.floor((low_cell_val * cells_val) / 10)
     end
 
+    local alerts_written = 0
+
     -- Helper to program LS and linked SF dynamically
     local function setupAlert(ls_idx, sf_idx, sensor_id, func_type, threshold, delay, rep_time)
         if not sensor_id then return end
@@ -104,6 +106,7 @@ local function writeSettings()
                 param = rep_time,
                 active = 1
             })
+            alerts_written = alerts_written + 1
         end
     end
 
@@ -111,15 +114,38 @@ local function writeSettings()
     setupAlert(free_lss[1], free_sfs[1], rssi_id, LS_FUNC_VNEG, rssi_val, 10, repeat_val)
     setupAlert(free_lss[2], free_sfs[2], rsnr_id, LS_FUNC_VNEG, rsnr_val, 30, repeat_val)
     setupAlert(free_lss[3], free_sfs[3], rqly_id, LS_FUNC_VNEG, rqly_val, 5, repeat_val)
-    setupAlert(free_lss[4], free_sfs[4], rxbt_id, LS_FUNC_VNEG, total_voltage_scaled, 30, repeat_val)
+    
+    if rxbt_id then
+        local battery_ls_index = free_lss[4]
+        model.setLogicalSwitch(battery_ls_index, {
+            func = LS_FUNC_VNEG,       -- a < x comparison
+            v1 = rxbt_id,              -- RxBt sensor ID
+            v2 = total_voltage_scaled, -- Calculated threshold
+            delay = 30                 -- 3.0-second delay for voltage sag
+        })
+        
+        local switch_name = string.format("L%02d", battery_ls_index + 1)
+        local trigger = getSwitchIndex(switch_name) or getSwitchIndex(string.format("L%d", battery_ls_index + 1))
+        if trigger then
+            model.setCustomFunction(free_sfs[4], {
+                switch = trigger,
+                func = FUNC_PLAY_VALUE,
+                value = rxbt_id,
+                param = repeat_val,
+                active = 1
+            })
+            alerts_written = alerts_written + 1
+        end
+    end
     
     -- Setup Dynamic Power (play once on change)
     if tpwr_id then
         model.setLogicalSwitch(free_lss[5], {
-            func = LS_FUNC_DIFFEGREATER,
+            func = LS_FUNC_ADIFFEGREATER,
             v1 = tpwr_id,
             v2 = 1,
-            delay = 0
+            delay = 0,
+            duration = 0
         })
         local switch_name = string.format("L%02d", free_lss[5] + 1)
         local trigger = getSwitchIndex(switch_name) or getSwitchIndex(string.format("L%d", free_lss[5] + 1))
@@ -131,7 +157,13 @@ local function writeSettings()
                 param = 0, -- once
                 active = 1
             })
+            alerts_written = alerts_written + 1
         end
+    end
+
+    if alerts_written == 0 then
+        errorMessage = "Error: No telemetry sensors found! Discover RxBt/RSSI first."
+        return false
     end
     return true
 end
@@ -146,7 +178,7 @@ local function run(event)
     if showSuccess then
         if isColor then
             lcd.drawFilledRectangle(0, 0, w, h, BLUE)
-            lcd.drawText(w/2 - 160, h/2 - 30, "UAVTech Setup Wizard", DBLSIZE + WHITE)
+            lcd.drawText(w/2 - 160, h/2 - 30, "Telemetry Callout Setup Wizard", DBLSIZE + WHITE)
             lcd.drawText(w/2 - 120, h/2 + 10, "SUCCESSFULLY APPENDED!", MIDSIZE + YELLOW)
             lcd.drawText(w/2 - 100, h/2 + 40, "Press any key to exit.", SMLSIZE + WHITE)
         else
@@ -204,9 +236,9 @@ local function run(event)
 
     if isColor then
         lcd.drawFilledRectangle(0, 0, w, 45, DARKBLUE)
-        lcd.drawText(20, 10, "UAVTech Dynamic Setup", DBLSIZE + WHITE)
+        lcd.drawText(20, 10, "Telemetry Callout Setup", DBLSIZE + WHITE)
     else
-        lcd.drawText(5, 0, "UAVTech Append Setup", SMLSIZE)
+        lcd.drawText(5, 0, "Telemetry Callout Setup", SMLSIZE)
         lcd.drawLine(0, 7, w, 7, SOLID, 0)
     end
 

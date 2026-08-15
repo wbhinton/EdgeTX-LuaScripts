@@ -22,7 +22,7 @@ local function findFreeLogicalSwitches(count)
     for i = 0, 63 do
         local ls = model.getLogicalSwitch(i)
         if not ls or ls.func == 0 or ls.func == LS_FUNC_NONE then
-            table.insert(free_indices, i)
+            free_indices[#free_indices + 1] = i
             if #free_indices == count then return free_indices end
         end
     end
@@ -35,7 +35,7 @@ local function findFreeCurves(count)
     for i = 0, 31 do
         local curve = model.getCurve(i)
         if not curve or curve.name == "" or #curve.y == 0 then
-            table.insert(free_indices, i)
+            free_indices[#free_indices + 1] = i
             if #free_indices == count then return free_indices end
         end
     end

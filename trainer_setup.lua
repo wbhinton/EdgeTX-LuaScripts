@@ -9,7 +9,7 @@ local function findFreeLogicalSwitches(count)
     for i = 0, 63 do
         local ls = model.getLogicalSwitch(i)
         if not ls or ls.func == 0 or ls.func == LS_FUNC_NONE then
-            table.insert(free_indices, i)
+            free_indices[#free_indices + 1] = i
             if #free_indices == count then
                 return free_indices
             end
@@ -23,7 +23,7 @@ local function findFreeSpecialFunctions(count)
     for i = 0, 63 do
         local sf = model.getCustomFunction(i)
         if not sf or sf.func == 0 then
-            table.insert(free_indices, i)
+            free_indices[#free_indices + 1] = i
             if #free_indices == count then
                 return free_indices
             end
