@@ -53,9 +53,9 @@ local function writeChirp()
     local sw_opts = { "sc↑", "sd↓", "sf↓" }
     local safe_opts = { "sb-", "sc-", "sa-" }
     
-    local trigger_sw_id = getSwitchIndex(sw_opts[menuItems[12].val])
-    local safety_sw_id = getSwitchIndex(safe_opts[menuItems[13].val])
-    local weight = menuItems[14].val
+    local trigger_sw_id = getSwitchIndex(sw_opts[menuItems[1].val])
+    local safety_sw_id = getSwitchIndex(safe_opts[menuItems[2].val])
+    local weight = menuItems[3].val
 
     if not trigger_sw_id or not safety_sw_id then
         errorMessage = "Error: Selected switches not found!"
@@ -75,13 +75,13 @@ local function writeChirp()
     local sc4_y = {0, 100, 0, -100, 0, 100, 0, -100, 0, 100, 0, -100, 0, 100, 0, -100, 0}
     local sc4_x = {-100, -86, -72, -58, -45, -32, -19, -6, 7, 19, 31, 43, 55, 66, 78, 89, 100}
 
-    model.setCurve(free_curves[12], { name = "Sc1", type = 1, smooth = 1, x = sc1_x, y = sc1_y })
-    model.setCurve(free_curves[13], { name = "Sc2", type = 1, smooth = 1, x = sc2_x, y = sc2_y })
-    model.setCurve(free_curves[14], { name = "Sc3", type = 1, smooth = 1, x = sc3_x, y = sc3_y })
-    model.setCurve(free_curves[15], { name = "Sc4", type = 1, smooth = 1, x = sc4_x, y = sc4_y })
+    model.setCurve(free_curves[1], { name = "Sc1", type = 1, smooth = true, x = sc1_x, y = sc1_y })
+    model.setCurve(free_curves[2], { name = "Sc2", type = 1, smooth = true, x = sc2_x, y = sc2_y })
+    model.setCurve(free_curves[3], { name = "Sc3", type = 1, smooth = true, x = sc3_x, y = sc3_y })
+    model.setCurve(free_curves[4], { name = "Sc4", type = 1, smooth = true, x = sc4_x, y = sc4_y })
 
     -- 2. Setup Logical Switches (L01 - L04) [7, 16]
-    local ls1_idx, ls2_idx, ls3_idx, ls4_idx = free_lss[12], free_lss[13], free_lss[14], free_lss[15]
+    local ls1_idx, ls2_idx, ls3_idx, ls4_idx = free_lss[1], free_lss[2], free_lss[3], free_lss[4]
     local l1_name = string.format("L%02d", ls1_idx + 1)
     local l3_name = string.format("L%02d", ls3_idx + 1)
 
@@ -103,10 +103,10 @@ local function writeChirp()
 
     -- 3. Write Mixer lines (Roll CH1 & Pitch CH2) in ADD mode [9, 10]
     local mix_plans = {
-        { curve = free_curves[12], name = "WR1", delay = 0, slow = 13 },
-        { curve = free_curves[13], name = "WR2", delay = 13, slow = 5 },
-        { curve = free_curves[14], name = "WR3", delay = 18, slow = 3 },
-        { curve = free_curves[15], name = "WR4", delay = 21, slow = 2 }
+        { curve = free_curves[1], name = "WR1", delay = 0, slow = 13 },
+        { curve = free_curves[2], name = "WR2", delay = 13, slow = 5 },
+        { curve = free_curves[3], name = "WR3", delay = 18, slow = 3 },
+        { curve = free_curves[4], name = "WR4", delay = 21, slow = 2 }
     }
 
     for _, mix in ipairs(mix_plans) do
@@ -115,7 +115,7 @@ local function writeChirp()
         model.insertMix(0, ch1_cnt, {
             name = mix.name,
             source = ls2_sw_id,
-            weight = weight,
+            weight = math.floor(weight * 10.24),
             curveType = 2,
             curveValue = mix.curve,
             multiplex = 0, -- ADD
@@ -127,7 +127,7 @@ local function writeChirp()
         model.insertMix(1, ch2_cnt, {
             name = "WP" .. string.sub(mix.name, 3),
             source = ls4_sw_id,
-            weight = weight,
+            weight = math.floor(weight * 10.24),
             curveType = 2,
             curveValue = mix.curve,
             multiplex = 0, -- ADD

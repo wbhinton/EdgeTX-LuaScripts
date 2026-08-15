@@ -73,10 +73,10 @@ local function run(event)
         end
 
         -- Map out our sequential empty logical switches
-        local l1_idx = free_lss[9]
-        local l2_idx = free_lss[10]
-        local l3_idx = free_lss[11]
-        local l4_idx = free_lss[12]
+        local l1_idx = free_lss[1]
+        local l2_idx = free_lss[2]
+        local l3_idx = free_lss[3]
+        local l4_idx = free_lss[4]
 
         -- L_A (L1): |a|>x on Aileron
         model.setLogicalSwitch(l1_idx, { func = LS_FUNC_APOS, v1 = ail_stick, v2 = 10, delay = 0 })
@@ -110,14 +110,14 @@ local function run(event)
 
         if l4_sw_id and not_l4_sw_id then
             -- SF_A: Play "trnon"
-            model.setCustomFunction(free_sfs[9], {
+            model.setCustomFunction(free_sfs[1], {
                 switch = l4_sw_id,
                 func = FUNC_PLAY_TRACK,
                 name = "trnon",
                 active = 1
             })
             -- SF_B: Play "trnoff"
-            model.setCustomFunction(free_sfs[10], {
+            model.setCustomFunction(free_sfs[2], {
                 switch = not_l4_sw_id,
                 func = FUNC_PLAY_TRACK,
                 name = "trnoff",
@@ -145,7 +145,7 @@ local function run(event)
                 model.insertMix(mix.ch, 1, {
                     name = "Studnt",
                     source = student_mix_src,
-                    weight = 100,
+                    weight = 1024,
                     switch = l4_sw_id,
                     multiplex = 2 -- REPLACE mode
                 })

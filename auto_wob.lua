@@ -54,7 +54,7 @@ local function writeWobble()
 
     -- Determine physical toggle trigger switch
     local sw_opts = { "sh↓", "sf↓", "sg↓" }
-    local trigger_sw_name = sw_opts[menuItems[11].val]
+    local trigger_sw_name = sw_opts[menuItems[1].val]
     local sw_trigger_id = getSwitchIndex(trigger_sw_name)
 
     if not sw_trigger_id then
@@ -62,10 +62,10 @@ local function writeWobble()
         return false
     end
 
-    local weight = menuItems[12].val
+    local weight = menuItems[2].val
 
     -- 1. Setup the 4 custom 17-point Standard curves (R1, R2, P1, P2)
-    local r1_idx, r2_idx, p1_idx, p2_idx = free_curves[11], free_curves[12], free_curves[13], free_curves[14]
+    local r1_idx, r2_idx, p1_idx, p2_idx = free_curves[1], free_curves[2], free_curves[3], free_curves[4]
 
     -- Curve arrays (Standard spaced in time, smoothing on)
     local r1_y = {0, 0, 0, 0, 0, weight, 0, -weight, 0, weight, 0, -weight, 0, weight, 0, -weight, 0}
@@ -73,13 +73,13 @@ local function writeWobble()
     local p1_y = {0, weight, 0, -weight, 0, weight, 0, -weight, 0, 0, 0, 0, 0, -weight, 0, weight, 0}
     local p2_y = {0, -weight, 0, weight, 0, -weight, 0, weight, 0, 0, 0, 0, 0, weight, 0, -weight, 0}
 
-    model.setCurve(r1_idx, { name = "R1", type = 0, smooth = 1, y = r1_y })
-    model.setCurve(r2_idx, { name = "R2", type = 0, smooth = 1, y = r2_y })
-    model.setCurve(p1_idx, { name = "P1", type = 0, smooth = 1, y = p1_y })
-    model.setCurve(p2_idx, { name = "P2", type = 0, smooth = 1, y = p2_y })
+    model.setCurve(r1_idx, { name = "R1", type = 0, smooth = true, y = r1_y })
+    model.setCurve(r2_idx, { name = "R2", type = 0, smooth = true, y = r2_y })
+    model.setCurve(p1_idx, { name = "P1", type = 0, smooth = true, y = p1_y })
+    model.setCurve(p2_idx, { name = "P2", type = 0, smooth = true, y = p2_y })
 
     -- 2. Setup Logical Switches
-    local ls1_idx, ls2_idx = free_lss[11], free_lss[12]
+    local ls1_idx, ls2_idx = free_lss[1], free_lss[2]
     local ls1_name = string.format("L%02d", ls1_idx + 1)
     local ls2_name = string.format("L%02d", ls2_idx + 1)
 
@@ -114,7 +114,7 @@ local function writeWobble()
     model.insertMix(0, ch1_count, {
         name = "WobR1",
         source = ls2_sw_id,
-        weight = 100,
+        weight = 1024,
         curveType = 2, -- Custom curve
         curveValue = r1_idx,
         multiplex = 0, -- ADD
@@ -123,7 +123,7 @@ local function writeWobble()
     model.insertMix(0, ch1_count + 1, {
         name = "WobR2",
         source = ls2_sw_id,
-        weight = 100,
+        weight = 1024,
         curveType = 2,
         curveValue = r2_idx,
         multiplex = 0, -- ADD
@@ -136,7 +136,7 @@ local function writeWobble()
     model.insertMix(1, ch2_count, {
         name = "WobP1",
         source = ls2_sw_id,
-        weight = 100,
+        weight = 1024,
         curveType = 2,
         curveValue = p1_idx,
         multiplex = 0, -- ADD
@@ -145,7 +145,7 @@ local function writeWobble()
     model.insertMix(1, ch2_count + 1, {
         name = "WobP2",
         source = ls2_sw_id,
-        weight = 100,
+        weight = 1024,
         curveType = 2,
         curveValue = p2_idx,
         multiplex = 0, -- ADD

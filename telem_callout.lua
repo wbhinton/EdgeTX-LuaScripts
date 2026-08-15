@@ -65,12 +65,12 @@ local function writeSettings()
     local rsnr_id = getSourceIndex("RSNR")
     local tpwr_id = getSourceIndex("TPWR")
 
-    local cells_val = menuItems[9].val
-    local low_cell_val = menuItems[10].val
-    local rqly_val = menuItems[11].val
-    local rssi_val = menuItems[12].val
-    local rsnr_val = menuItems[13].val
-    local repeat_val = menuItems[14].val
+    local cells_val = menuItems[1].val
+    local low_cell_val = menuItems[2].val
+    local rqly_val = menuItems[3].val
+    local rssi_val = menuItems[4].val
+    local rsnr_val = menuItems[5].val
+    local repeat_val = menuItems[6].val
 
     local total_voltage_scaled
     if cells_val == 0 then
@@ -108,23 +108,23 @@ local function writeSettings()
     end
 
     -- Setup each alert sequentially on the resolved empty slots
-    setupAlert(free_lss[9], free_sfs[9], rssi_id, LS_FUNC_VNEG, rssi_val, 10, repeat_val)
-    setupAlert(free_lss[10], free_sfs[10], rsnr_id, LS_FUNC_VNEG, rsnr_val, 30, repeat_val)
-    setupAlert(free_lss[11], free_sfs[11], rqly_id, LS_FUNC_VNEG, rqly_val, 5, repeat_val)
-    setupAlert(free_lss[12], free_sfs[12], rxbt_id, LS_FUNC_VNEG, total_voltage_scaled, 30, repeat_val)
+    setupAlert(free_lss[1], free_sfs[1], rssi_id, LS_FUNC_VNEG, rssi_val, 10, repeat_val)
+    setupAlert(free_lss[2], free_sfs[2], rsnr_id, LS_FUNC_VNEG, rsnr_val, 30, repeat_val)
+    setupAlert(free_lss[3], free_sfs[3], rqly_id, LS_FUNC_VNEG, rqly_val, 5, repeat_val)
+    setupAlert(free_lss[4], free_sfs[4], rxbt_id, LS_FUNC_VNEG, total_voltage_scaled, 30, repeat_val)
     
     -- Setup Dynamic Power (play once on change)
     if tpwr_id then
-        model.setLogicalSwitch(free_lss[13], {
+        model.setLogicalSwitch(free_lss[5], {
             func = LS_FUNC_DIFFEGREATER,
             v1 = tpwr_id,
             v2 = 1,
             delay = 0
         })
-        local switch_name = string.format("L%02d", free_lss[13] + 1)
-        local trigger = getSwitchIndex(switch_name) or getSwitchIndex(string.format("L%d", free_lss[13] + 1))
+        local switch_name = string.format("L%02d", free_lss[5] + 1)
+        local trigger = getSwitchIndex(switch_name) or getSwitchIndex(string.format("L%d", free_lss[5] + 1))
         if trigger then
-            model.setCustomFunction(free_sfs[13], {
+            model.setCustomFunction(free_sfs[5], {
                 switch = trigger,
                 func = FUNC_PLAY_VALUE,
                 value = tpwr_id,
