@@ -3,7 +3,7 @@
 -- Non-destructive: appends free logical switches, curves, and mixes.
 
 local menuItems = {
-    { label = "Wobble Switch", val = 1, min = 1, max = 3, step = 1, display = function(v) return v == 1 and "sh↓" or (v == 2 and "sf↓" or "sg↓") end },
+    { label = "Wobble Switch", isDetect = true, swId = nil, swName = nil },
     { label = "Wobble Weight", val = 50, min = 10, max = 100, step = 5, display = function(v) return v .. "%" end },
     { label = "WRITE WOBBLE", isButton = true }
 }
@@ -12,6 +12,11 @@ local selected = 1
 local editing = false
 local showSuccess = false
 local errorMessage = nil
+
+-- Switch detection state
+local detecting = false
+local detectPrev = {}
+local detectedId = nil
 
 local function init()
 end
@@ -29,17 +34,59 @@ local function findFreeLogicalSwitches(count)
     return nil
 end
 
+-- A curve slot is free only if it is unnamed and still flat (all y == 0)
+local function isCurveFree(curve)
+    if not curve then return true end
+    if curve.name and curve.name ~= "" then return false end
+    for _, y in ipairs(curve.y or {}) do
+        if y ~= 0 then return false end
+    end
+    return true
+end
+
 -- Find free Curve slots
 local function findFreeCurves(count)
     local free_indices = {}
     for i = 0, 31 do
-        local curve = model.getCurve(i)
-        if not curve or curve.name == "" or #curve.y == 0 then
+        if isCurveFree(model.getCurve(i)) then
             free_indices[#free_indices + 1] = i
             if #free_indices == count then return free_indices end
         end
     end
     return nil
+end
+
+-- Physical switch positions only (SA.., SW1..), skipping inverted, logical, trims, etc.
+local function isPhysicalSwitch(idx, name)
+    return idx > 0 and name ~= nil and string.match(name, "^S%u") ~= nil
+end
+
+local function startDetect()
+    detectPrev = {}
+    for idx, name in switches() do
+        if isPhysicalSwitch(idx, name) then
+            detectPrev[idx] = getSwitchValue(idx)
+        end
+    end
+    detectedId = nil
+    detecting = true
+end
+
+-- Track the most recent position that turned on; clear it if it turns back off
+local function pollDetect()
+    for idx, was in pairs(detectPrev) do
+        local now = getSwitchValue(idx)
+        if now and not was then detectedId = idx end
+        detectPrev[idx] = now
+    end
+    if detectedId and not detectPrev[detectedId] then detectedId = nil end
+end
+
+-- Mix sources use source indices, which differ from switch indices
+local function logicalSwitchSource(ls_idx)
+    local info = getFieldInfo("ls" .. (ls_idx + 1))
+    if info then return info.id end
+    return getSourceIndex(string.format("L%02d", ls_idx + 1))
 end
 
 local function writeWobble()
@@ -52,13 +99,11 @@ local function writeWobble()
         return false
     end
 
-    -- Determine physical toggle trigger switch
-    local sw_opts = { "sh↓", "sf↓", "sg↓" }
-    local trigger_sw_name = sw_opts[menuItems[1].val]
-    local sw_trigger_id = getSwitchIndex(trigger_sw_name)
+    -- Physical toggle trigger switch, chosen via detection
+    local sw_trigger_id = menuItems[1].swId
 
     if not sw_trigger_id then
-        errorMessage = "Error: Physical switch " .. trigger_sw_name .. " not found!"
+        errorMessage = "Error: Detect a Wobble Switch first!"
         return false
     end
 
@@ -73,21 +118,28 @@ local function writeWobble()
     local p1_y = {0, weight, 0, -weight, 0, weight, 0, -weight, 0, 0, 0, 0, 0, -weight, 0, weight, 0}
     local p2_y = {0, -weight, 0, weight, 0, -weight, 0, weight, 0, 0, 0, 0, 0, weight, 0, -weight, 0}
 
-    model.setCurve(r1_idx, { name = "R1", type = 0, smooth = true, y = r1_y })
-    model.setCurve(r2_idx, { name = "R2", type = 0, smooth = true, y = r2_y })
-    model.setCurve(p1_idx, { name = "P1", type = 0, smooth = true, y = p1_y })
-    model.setCurve(p2_idx, { name = "P2", type = 0, smooth = true, y = p2_y })
+    local curves = {
+        { r1_idx, "R1", r1_y }, { r2_idx, "R2", r2_y },
+        { p1_idx, "P1", p1_y }, { p2_idx, "P2", p2_y },
+    }
+    for _, c in ipairs(curves) do
+        local rc = model.setCurve(c[1], { name = c[2], type = 0, smooth = true, y = c[3] })
+        if rc and rc ~= 0 then
+            errorMessage = "Error: Curve " .. c[2] .. " write failed (code " .. rc .. ")"
+            return false
+        end
+    end
 
     -- 2. Setup Logical Switches
     local ls1_idx, ls2_idx = free_lss[1], free_lss[2]
     local ls1_name = string.format("L%02d", ls1_idx + 1)
-    local ls2_name = string.format("L%02d", ls2_idx + 1)
 
     -- Resolve negative trigger targets
     local not_ls1_sw_id = getSwitchIndex("!" .. ls1_name) or getSwitchIndex("!" .. string.format("L%d", ls1_idx + 1))
-    local ls2_sw_id = getSwitchIndex(ls2_name) or getSwitchIndex(string.format("L%d", ls2_idx + 1))
 
-    if not (not_ls1_sw_id and ls2_sw_id) then
+    local ls2_src_id = logicalSwitchSource(ls2_idx)
+
+    if not (not_ls1_sw_id and ls2_src_id) then
         errorMessage = "Error constructing Logical triggers!"
         return false
     end
@@ -113,19 +165,19 @@ local function writeWobble()
     local ch1_count = model.getMixesCount(0)
     model.insertMix(0, ch1_count, {
         name = "WobR1",
-        source = ls2_sw_id,
+        source = ls2_src_id,
         weight = 1024,
-        curveType = 2, -- Custom curve
-        curveValue = r1_idx,
+        curveType = 3, -- Custom curve (0=diff, 1=expo, 2=func, 3=custom)
+        curveValue = r1_idx + 1, -- custom curve refs are 1-based
         multiplex = 0, -- ADD
         speedUp = 15 -- 1.5s slow up
     })
     model.insertMix(0, ch1_count + 1, {
         name = "WobR2",
-        source = ls2_sw_id,
+        source = ls2_src_id,
         weight = 1024,
-        curveType = 2,
-        curveValue = r2_idx,
+        curveType = 3,
+        curveValue = r2_idx + 1, -- custom curve refs are 1-based
         multiplex = 0, -- ADD
         speedUp = 15, -- 1.5s slow up
         delayUp = 15 -- 1.5s delay up
@@ -135,19 +187,19 @@ local function writeWobble()
     local ch2_count = model.getMixesCount(1)
     model.insertMix(1, ch2_count, {
         name = "WobP1",
-        source = ls2_sw_id,
+        source = ls2_src_id,
         weight = 1024,
-        curveType = 2,
-        curveValue = p1_idx,
+        curveType = 3,
+        curveValue = p1_idx + 1, -- custom curve refs are 1-based
         multiplex = 0, -- ADD
         speedUp = 15 -- 1.5s slow up
     })
     model.insertMix(1, ch2_count + 1, {
         name = "WobP2",
-        source = ls2_sw_id,
+        source = ls2_src_id,
         weight = 1024,
-        curveType = 2,
-        curveValue = p2_idx,
+        curveType = 3,
+        curveValue = p2_idx + 1, -- custom curve refs are 1-based
         multiplex = 0, -- ADD
         speedUp = 15, -- 1.5s slow up
         delayUp = 15 -- 1.5s delay up
@@ -183,6 +235,35 @@ local function run(event)
         return 0
     end
 
+    if detecting then
+        pollDetect()
+        if event == EVT_VIRTUAL_ENTER and detectedId then
+            menuItems[1].swId = detectedId
+            menuItems[1].swName = getSwitchName(detectedId)
+            detecting = false
+        elseif event == EVT_VIRTUAL_EXIT then
+            detecting = false
+        end
+
+        local found = detectedId and getSwitchName(detectedId) or "waiting..."
+        if isColor then
+            lcd.drawFilledRectangle(0, 0, w, 45, DARKBLUE)
+            lcd.drawText(20, 10, "Detect Wobble Switch", DBLSIZE + WHITE)
+            lcd.drawText(20, 70, "Flip the switch to the position", MIDSIZE + WHITE)
+            lcd.drawText(20, 100, "that should ACTIVATE wobble.", MIDSIZE + WHITE)
+            lcd.drawText(20, 145, "Detected: " .. found, DBLSIZE + YELLOW)
+            lcd.drawText(20, 210, "ENTER = confirm   EXIT = cancel", SMLSIZE + WHITE)
+        else
+            lcd.drawText(5, 0, "Detect Wobble Switch", SMLSIZE)
+            lcd.drawLine(0, 7, w, 7, SOLID, 0)
+            lcd.drawText(5, 12, "Flip switch to the", SMLSIZE)
+            lcd.drawText(5, 20, "ACTIVATE position.", SMLSIZE)
+            lcd.drawText(5, 32, "Got: " .. found, MIDSIZE)
+            lcd.drawText(5, 54, "ENT=ok  EXIT=cancel", SMLSIZE)
+        end
+        return 0
+    end
+
     -- Input Handler
     if not editing then
         if event == EVT_VIRTUAL_NEXT then
@@ -194,6 +275,8 @@ local function run(event)
         elseif event == EVT_VIRTUAL_ENTER then
             if menuItems[selected].isButton then
                 if writeWobble() then showSuccess = true end
+            elseif menuItems[selected].isDetect then
+                startDetect()
             else
                 editing = true
             end
@@ -253,7 +336,8 @@ local function run(event)
             end
         else
             lcd.drawText(leftAlign, y, item.label, textFlag)
-            lcd.drawText(rightAlign, y, item.display(item.val), valFlag)
+            local valText = item.isDetect and (item.swName or "[ENTER]") or item.display(item.val)
+            lcd.drawText(rightAlign, y, valText, valFlag)
         end
     end
 

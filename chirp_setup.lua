@@ -3,8 +3,8 @@
 -- Non-destructive: scans, appends, and links LS, Curves, and Mixes.
 
 local menuItems = {
-    { label = "Chirp Switch", val = 1, min = 1, max = 3, step = 1, display = function(v) return v == 1 and "sc↑" or (v == 2 and "sd↓" or "sf↓") end },
-    { label = "Safety Switch", val = 1, min = 1, max = 3, step = 1, display = function(v) return v == 1 and "sb-" or (v == 2 and "sc-" or "sa-") end },
+    { label = "Chirp Switch", isDetect = true, swId = nil, swName = nil },
+    { label = "Safety Switch", isDetect = true, swId = nil, swName = nil },
     { label = "Chirp Weight", val = 23, min = 5, max = 40, step = 1, display = function(v) return v .. "%" end },
     { label = "WRITE CHIRP", isButton = true }
 }
@@ -13,6 +13,11 @@ local selected = 1
 local editing = false
 local showSuccess = false
 local errorMessage = nil
+
+-- Switch detection state
+local detectItem = nil
+local detectPrev = {}
+local detectedId = nil
 
 local function init()
 end
@@ -29,16 +34,58 @@ local function findFreeLogicalSwitches(count)
     return nil
 end
 
+-- A curve slot is free only if it is unnamed and still flat (all y == 0)
+local function isCurveFree(curve)
+    if not curve then return true end
+    if curve.name and curve.name ~= "" then return false end
+    for _, y in ipairs(curve.y or {}) do
+        if y ~= 0 then return false end
+    end
+    return true
+end
+
 local function findFreeCurves(count)
     local free_indices = {}
     for i = 0, 31 do
-        local curve = model.getCurve(i)
-        if not curve or curve.name == "" or #curve.y == 0 then
+        if isCurveFree(model.getCurve(i)) then
             free_indices[#free_indices + 1] = i
             if #free_indices == count then return free_indices end
         end
     end
     return nil
+end
+
+-- Physical switch positions only (SA.., SW1..), skipping inverted, logical, trims, etc.
+local function isPhysicalSwitch(idx, name)
+    return idx > 0 and name ~= nil and string.match(name, "^S%u") ~= nil
+end
+
+local function startDetect(item)
+    detectPrev = {}
+    for idx, name in switches() do
+        if isPhysicalSwitch(idx, name) then
+            detectPrev[idx] = getSwitchValue(idx)
+        end
+    end
+    detectedId = nil
+    detectItem = item
+end
+
+-- Track the most recent position that turned on; clear it if it turns back off
+local function pollDetect()
+    for idx, was in pairs(detectPrev) do
+        local now = getSwitchValue(idx)
+        if now and not was then detectedId = idx end
+        detectPrev[idx] = now
+    end
+    if detectedId and not detectPrev[detectedId] then detectedId = nil end
+end
+
+-- Mix sources use source indices, which differ from switch indices
+local function logicalSwitchSource(ls_idx)
+    local info = getFieldInfo("ls" .. (ls_idx + 1))
+    if info then return info.id end
+    return getSourceIndex(string.format("L%02d", ls_idx + 1))
 end
 
 local function writeChirp()
@@ -50,15 +97,13 @@ local function writeChirp()
         return false
     end
 
-    local sw_opts = { "sc↑", "sd↓", "sf↓" }
-    local safe_opts = { "sb-", "sc-", "sa-" }
-    
-    local trigger_sw_id = getSwitchIndex(sw_opts[menuItems[1].val])
-    local safety_sw_id = getSwitchIndex(safe_opts[menuItems[2].val])
+    -- Trigger and safety switch positions, chosen via detection
+    local trigger_sw_id = menuItems[1].swId
+    local safety_sw_id = menuItems[2].swId
     local weight = menuItems[3].val
 
     if not trigger_sw_id or not safety_sw_id then
-        errorMessage = "Error: Selected switches not found!"
+        errorMessage = "Error: Detect Chirp & Safety switches!"
         return false
     end
 
@@ -75,10 +120,17 @@ local function writeChirp()
     local sc4_y = {0, 100, 0, -100, 0, 100, 0, -100, 0, 100, 0, -100, 0, 100, 0, -100, 0}
     local sc4_x = {-100, -86, -72, -58, -45, -32, -19, -6, 7, 19, 31, 43, 55, 66, 78, 89, 100}
 
-    model.setCurve(free_curves[1], { name = "Sc1", type = 1, smooth = true, x = sc1_x, y = sc1_y })
-    model.setCurve(free_curves[2], { name = "Sc2", type = 1, smooth = true, x = sc2_x, y = sc2_y })
-    model.setCurve(free_curves[3], { name = "Sc3", type = 1, smooth = true, x = sc3_x, y = sc3_y })
-    model.setCurve(free_curves[4], { name = "Sc4", type = 1, smooth = true, x = sc4_x, y = sc4_y })
+    local curves = {
+        { "Sc1", sc1_x, sc1_y }, { "Sc2", sc2_x, sc2_y },
+        { "Sc3", sc3_x, sc3_y }, { "Sc4", sc4_x, sc4_y },
+    }
+    for i, c in ipairs(curves) do
+        local rc = model.setCurve(free_curves[i], { name = c[1], type = 1, smooth = true, x = c[2], y = c[3] })
+        if rc and rc ~= 0 then
+            errorMessage = "Error: Curve " .. c[1] .. " write failed (code " .. rc .. ")"
+            return false
+        end
+    end
 
     -- 2. Setup Logical Switches (L01 - L04) [7, 16]
     local ls1_idx, ls2_idx, ls3_idx, ls4_idx = free_lss[1], free_lss[2], free_lss[3], free_lss[4]
@@ -88,6 +140,15 @@ local function writeChirp()
     local not_l01_id = getSwitchIndex("!" .. l1_name) or getSwitchIndex("!" .. string.format("L%d", ls1_idx + 1))
     local l03_id = getSwitchIndex(l3_name) or getSwitchIndex(string.format("L%d", ls3_idx + 1))
 
+    -- Resolve LS sources for Mix page mapping [17]
+    local ls2_src_id = logicalSwitchSource(ls2_idx)
+    local ls4_src_id = logicalSwitchSource(ls4_idx)
+
+    if not (not_l01_id and l03_id and ls2_src_id and ls4_src_id) then
+        errorMessage = "Error constructing Logical triggers!"
+        return false
+    end
+
     -- L01: Repeat Latch
     model.setLogicalSwitch(ls1_idx, { func = LS_FUNC_AND, v1 = trigger_sw_id, v2 = not_l01_id, delay = 25 })
     -- L02: Roll Enable (Triggers WP1-4 mixes) [9]
@@ -96,10 +157,6 @@ local function writeChirp()
     model.setLogicalSwitch(ls3_idx, { func = LS_FUNC_AND, v1 = trigger_sw_id, v2 = not_l01_id, delay = 13, duration = 1 })
     -- L04: Pitch Enable (Triggers HP1-4 mixes) [9, 10]
     model.setLogicalSwitch(ls4_idx, { func = LS_FUNC_AND, v1 = 0, v2 = l03_id, ["and"] = safety_sw_id, duration = 24 })
-
-    -- Resolve LS triggers for Mix page mapping [17]
-    local ls2_sw_id = getSwitchIndex(string.format("L%02d", ls2_idx + 1)) or getSwitchIndex(string.format("L%d", ls2_idx + 1))
-    local ls4_sw_id = getSwitchIndex(string.format("L%02d", ls4_idx + 1)) or getSwitchIndex(string.format("L%d", ls4_idx + 1))
 
     -- 3. Write Mixer lines (Roll CH1 & Pitch CH2) in ADD mode [9, 10]
     local mix_plans = {
@@ -114,10 +171,10 @@ local function writeChirp()
         local ch1_cnt = model.getMixesCount(0)
         model.insertMix(0, ch1_cnt, {
             name = mix.name,
-            source = ls2_sw_id,
+            source = ls2_src_id,
             weight = math.floor(weight * 10.24),
-            curveType = 2,
-            curveValue = mix.curve,
+            curveType = 3, -- Custom curve (0=diff, 1=expo, 2=func, 3=custom)
+            curveValue = mix.curve + 1, -- custom curve refs are 1-based
             multiplex = 0, -- ADD
             delayUp = mix.delay,
             speedUp = mix.slow
@@ -126,10 +183,10 @@ local function writeChirp()
         local ch2_cnt = model.getMixesCount(1)
         model.insertMix(1, ch2_cnt, {
             name = "WP" .. string.sub(mix.name, 3),
-            source = ls4_sw_id,
+            source = ls4_src_id,
             weight = math.floor(weight * 10.24),
-            curveType = 2,
-            curveValue = mix.curve,
+            curveType = 3, -- Custom curve (0=diff, 1=expo, 2=func, 3=custom)
+            curveValue = mix.curve + 1, -- custom curve refs are 1-based
             multiplex = 0, -- ADD
             delayUp = mix.delay,
             speedUp = mix.slow
@@ -164,6 +221,37 @@ local function run(event)
         return 0
     end
 
+    if detectItem then
+        pollDetect()
+        if event == EVT_VIRTUAL_ENTER and detectedId then
+            detectItem.swId = detectedId
+            detectItem.swName = getSwitchName(detectedId)
+            detectItem = nil
+            return 0
+        elseif event == EVT_VIRTUAL_EXIT then
+            detectItem = nil
+            return 0
+        end
+
+        local found = detectedId and getSwitchName(detectedId) or "waiting..."
+        if isColor then
+            lcd.drawFilledRectangle(0, 0, w, 45, DARKBLUE)
+            lcd.drawText(20, 10, "Detect " .. detectItem.label, DBLSIZE + WHITE)
+            lcd.drawText(20, 70, "Flip the switch to the position", MIDSIZE + WHITE)
+            lcd.drawText(20, 100, "that should ACTIVATE it.", MIDSIZE + WHITE)
+            lcd.drawText(20, 145, "Detected: " .. found, DBLSIZE + YELLOW)
+            lcd.drawText(20, 210, "ENTER = confirm   EXIT = cancel", SMLSIZE + WHITE)
+        else
+            lcd.drawText(5, 0, "Detect " .. detectItem.label, SMLSIZE)
+            lcd.drawLine(0, 7, w, 7, SOLID, 0)
+            lcd.drawText(5, 12, "Flip switch to the", SMLSIZE)
+            lcd.drawText(5, 20, "ACTIVATE position.", SMLSIZE)
+            lcd.drawText(5, 32, "Got: " .. found, MIDSIZE)
+            lcd.drawText(5, 54, "ENT=ok  EXIT=cancel", SMLSIZE)
+        end
+        return 0
+    end
+
     -- Handle Navigation
     if not editing then
         if event == EVT_VIRTUAL_NEXT then
@@ -175,6 +263,8 @@ local function run(event)
         elseif event == EVT_VIRTUAL_ENTER then
             if menuItems[selected].isButton then
                 if writeChirp() then showSuccess = true end
+            elseif menuItems[selected].isDetect then
+                startDetect(menuItems[selected])
             else
                 editing = true
             end
@@ -234,7 +324,8 @@ local function run(event)
             end
         else
             lcd.drawText(leftAlign, y, item.label, textFlag)
-            lcd.drawText(rightAlign, y, item.display(item.val), valFlag)
+            local valText = item.isDetect and (item.swName or "[ENTER]") or item.display(item.val)
+            lcd.drawText(rightAlign, y, valText, valFlag)
         end
     end
 
