@@ -1,16 +1,26 @@
 # EdgeTX Automation Lua Scripts
 
-A collection of non-destructive utility scripts designed to automate repetitive setup tasks on EdgeTX-compatible transmitters. These scripts scan your active model configuration and dynamically append the necessary curves, logical switches, mixes, and special functions without overwriting your existing settings.
+A collection of utility scripts designed to automate repetitive setup tasks on EdgeTX-compatible transmitters. These scripts scan your active model configuration and append the necessary curves, logical switches, mixes, and special functions into free slots, leaving your existing settings in place (see [Non-Destructive Design](#non-destructive-design) for the one exception).
 
 ---
 
-> [!WARNING]
-> **DISCLAIMER: USE AT YOUR OWN RISK**
-> These scripts modify active model configurations, including mixer lines, curves, and logical switches. Incorrect configuration or unexpected script behavior could result in corrupted model files, loss of control, or unexpected flyaways. 
-> 
-> *   **Always backup your radio's models and settings** using EdgeTX Companion before running any script.
-> *   **Always perform bench testing (WITH PROPELLERS REMOVED!)** to verify that all switch overrides, mixes, and safety cutoffs function as intended before attempting flight.
-> *   The authors accept no responsibility for damage, injury, or data loss resulting from the use of these scripts.
+> [!CAUTION]
+> **DISCLAIMER: USE THESE SCRIPTS ENTIRELY AT YOUR OWN RISK**
+>
+> These scripts modify active model configurations, including mixer lines, curves, logical switches, and special functions. Incorrect configuration, firmware differences between radios, or unexpected script behavior could result in corrupted model files, loss of control, flyaways, crashes, property damage, or personal injury.
+>
+> *   **Always back up your radio's models and settings** using EdgeTX Companion before running any script.
+> *   **Always bench test with the PROPELLERS REMOVED** to verify that every switch, mix, override, and safety cutoff works as intended before flying.
+> *   **Review every change the script makes** on the radio's Mixes, Logical Switches, Curves, and Special Functions pages before arming.
+>
+> These scripts are provided **"AS IS", without warranty of any kind**, express or implied. By using them you accept full responsibility for the outcome. **The developer assumes no liability whatsoever** for any damage, injury, loss of property, loss of data, or any other consequence, direct or indirect, arising from the use or misuse of these scripts.
+
+---
+
+## Requirements
+
+*   **EdgeTX 2.6 or newer.** Switch detection relies on the `switches()`, `getSwitchValue()`, and `getSwitchIndex()` Lua APIs introduced in 2.6.
+*   A model selected on the radio. All changes are written to the **currently active model**.
 
 ---
 
@@ -33,7 +43,7 @@ A collection of non-destructive utility scripts designed to automate repetitive 
     *   **4 Custom 17-Point Curves** (`R1`, `R2` for Roll; `P1`, `P2` for Pitch) to generate smoothed alternating sine wave signals.
     *   **4 Mixers** (appended in **ADD** mode to CH1 Aileron and CH2 Elevator to overlay wobble oscillations on top of normal stick inputs).
 *   **User Configurable Options:**
-    *   **Wobble Switch:** Physical trigger switch to activate the oscillations (options: `sh↓`, `sf↓`, `sg↓`).
+    *   **Wobble Switch:** Press ENTER, then flip the physical switch to the position that should activate the oscillations. The script detects it automatically.
     *   **Wobble Weight:** Amplitude percentage of the oscillation (10% to 100%).
 
 ---
@@ -46,8 +56,8 @@ A collection of non-destructive utility scripts designed to automate repetitive 
     *   **4 Custom 17-Point Smoothed Curves** (`Sc1` to `Sc4`) mapped to specific logarithmic spacing intervals.
     *   **8 Mixers** (4 added to CH1 Roll and 4 added to CH2 Pitch, sequenced with ascending delay and speed settings).
 *   **User Configurable Options:**
-    *   **Chirp Switch:** Main physical trigger switch (options: `sc↑`, `sd↓`, `sf↓`).
-    *   **Safety Switch:** Safety/Arm switch position required to execute the chirp (options: `sb-`, `sc-`, `sa-`).
+    *   **Chirp Switch:** Press ENTER, then flip the physical switch to the position that should trigger the chirp. The script detects it automatically.
+    *   **Safety Switch:** Press ENTER, then flip the safety/arm switch to the position required to execute the chirp. The script detects it automatically.
     *   **Chirp Weight:** Setpoint deflection amplitude (5% to 40%).
 
 ---
@@ -82,11 +92,29 @@ A collection of non-destructive utility scripts designed to automate repetitive 
 
 ## Technical Information
 
+### Switch Detection
+Instead of picking from a fixed list of switch names (which vary between radios), the Auto Wobble and Chirp tools detect switches live:
+
+1.  Select the switch option and press **ENTER**. The script records the current position of every physical switch.
+2.  Flip the switch to the position that should **activate** the feature. The detected position (e.g. `SH↓`, `SC-`) is shown on screen.
+3.  Press **ENTER** to confirm or **EXIT** to cancel.
+
+Notes:
+*   Only physical switches (`SA`, `SB`, ..., `SW1`, ...) are watched. Logical switches, trims, and other sources are ignored, so they cannot be picked by mistake.
+*   The **last** position you move to is kept. Moving a 3-position switch from up through middle to down selects the down position.
+*   The tool will not write anything until every required switch has been detected.
+
 ### Non-Destructive Design
 All scripts use scanning loops to search for empty slots before modifying anything:
 *   **Logical Switches:** Scans slots `L01` through `L64` for items set to `LS_FUNC_NONE` or `0`.
-*   **Curves:** Scans curve slots `1` through `32` for curves with no name and an empty coordinate table.
+*   **Curves:** Scans curve slots `1` through `32` for curves with no name and all points still at `0`. Any named or edited curve is left alone.
 *   **Special Functions:** Scans slots `SF1` through `SF64` for unassigned functions.
-*   **Mixes:** Mixer modifications either append mixers in **ADD** mode to keep stick control active, or safely replace stick control under specific switch positions.
+*   **Mixes:** New mixer lines are appended after your existing lines. Auto Wobble and Chirp add them in **ADD** mode to keep stick control active. **Exception:** Trainer Auto-Setup also edits your first CH1–CH4 mixer lines so they are active only when the student is not flying.
 
-If the script detects insufficient free slots for the requested setup, it will halt and display an error warning without making any modifications.
+If there are not enough free slots, or a required switch has not been detected, the script halts with an error before making any changes. If a write fails partway through (for example, the radio runs out of curve memory), the script stops and shows the error, but changes written up to that point remain. This is one more reason to back up your models first.
+
+---
+
+## License
+
+Released under the [MIT License](LICENSE). The software is provided "as is", without warranty of any kind. See the [disclaimer](#edgetx-automation-lua-scripts) above and the `LICENSE` file for full terms.
